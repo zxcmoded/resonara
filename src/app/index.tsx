@@ -1,98 +1,112 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from 'react';
+import { Modal, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabBar, type Tab } from '@/components/bottom-tab-bar';
+import { LibraryScreen } from '@/components/library-screen';
+import { ListenTogetherView } from '@/components/listen-together-view';
+import { MiniPlayer } from '@/components/mini-player';
+import { NotificationsScreen } from '@/components/notifications-screen';
+import { NowPlayingView } from '@/components/now-playing-view';
+import { ProfileScreen } from '@/components/profile-screen';
+import { SearchScreen } from '@/components/search-screen';
+import { SignInScreen } from '@/components/sign-in-screen';
+import { SignUpScreen } from '@/components/sign-up-screen';
+import { TimelineFeed } from '@/components/timeline-feed';
+import { MOCK_TRACK } from '@/context/player';
+import { usePlayer } from '@/context/player';
+import { useAuth } from '@/context/auth';
+import { ResonaraTheme, TAB_BAR_HEIGHT } from '@/constants/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+function AppContent() {
+  const [currentTab, setCurrentTab] = useState<Tab>('timeline');
+  const [showListenTogether, setShowListenTogether] = useState(false);
+  const { currentTrack, isPlaying, showNowPlaying, closeNowPlaying, openNowPlaying } = usePlayer();
+  const insets = useSafeAreaInsets();
+
+  const miniPlayerHeight = currentTrack ? 62 : 0;
+  const bottomInset = TAB_BAR_HEIGHT + insets.bottom + miniPlayerHeight;
+
+  const renderScreen = () => {
+    switch (currentTab) {
+      case 'timeline':
+        return <TimelineFeed bottomInset={bottomInset} />;
+      case 'search':
+        return <SearchScreen bottomInset={bottomInset} />;
+      case 'library':
+        return <LibraryScreen bottomInset={bottomInset} />;
+      case 'notifications':
+        return <NotificationsScreen bottomInset={bottomInset} />;
+      case 'profile':
+        return <ProfileScreen bottomInset={bottomInset} />;
+    }
+  };
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <View style={styles.root}>
+      {renderScreen()}
+
+      {/* Persistent mini player + tab bar stack */}
+      <View style={[styles.bottomStack, { paddingBottom: insets.bottom }]}>
+        <MiniPlayer />
+        <BottomTabBar
+          currentTab={currentTab}
+          onTabChange={setCurrentTab}
+          bottomInset={0}
+        />
+      </View>
+
+      {/* Now Playing full-screen modal */}
+      <Modal visible={showNowPlaying} animationType="slide" presentationStyle="fullScreen">
+        <View style={styles.modalContainer}>
+          {showListenTogether ? (
+            <ListenTogetherView
+              track={MOCK_TRACK}
+              onBack={() => setShowListenTogether(false)}
+              bottomInset={TAB_BAR_HEIGHT + insets.bottom}
+            />
+          ) : (
+            <NowPlayingView
+              track={MOCK_TRACK}
+              onBack={closeNowPlaying}
+              onListenTogether={() => setShowListenTogether(true)}
+            />
+          )}
+        </View>
+      </Modal>
+    </View>
   );
 }
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+type AuthScreen = 'signIn' | 'signUp';
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+function AuthFlow() {
+  const [screen, setScreen] = useState<AuthScreen>('signIn');
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+  if (screen === 'signUp') {
+    return <SignUpScreen onNavigateToSignIn={() => setScreen('signIn')} />;
+  }
+  return <SignInScreen onNavigateToSignUp={() => setScreen('signUp')} />;
+}
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
-  );
+export default function App() {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <AppContent /> : <AuthFlow />;
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: ResonaraTheme.background,
   },
-  safeArea: {
+  bottomStack: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalContainer: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+    backgroundColor: ResonaraTheme.background,
   },
 });

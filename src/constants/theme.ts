@@ -63,3 +63,23 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+export const ResonaraTheme = {
+  background: '#0B0D1A',
+  surface: '#131526',
+  border: '#1E2240',
+  text: '#FFFFFF',
+  textSecondary: '#8B8FA8',
+  textMuted: '#565A74',
+  accent: '#5B8DEF',
+  accentPink: '#FF3378',
+  accentPurple: '#9B51E0',
+  verified: '#1D9BF0',
+  progressTrack: '#252A45',
+  tabBar: '#0A0C18',
+  tabBarBorder: '#1E2240',
+  tabActive: '#FFFFFF',
+  tabInactive: '#4A4E6A',
+} as const;
+
+export const TAB_BAR_HEIGHT = 62;
