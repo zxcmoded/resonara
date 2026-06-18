@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,13 +22,10 @@ import { useAuth } from '@/context/auth';
 import { useGoogleAuth } from '@/hooks/use-google-auth';
 import { useFacebookAuth } from '@/hooks/use-facebook-auth';
 
-interface Props {
-  onNavigateToSignIn: () => void;
-}
-
-export function SignUpScreen({ onNavigateToSignIn }: Props) {
+export function SignUpScreen() {
   const insets = useSafeAreaInsets();
-  const { signUp } = useAuth();
+  const router = useRouter();
+  const { signUp, isAuthenticated } = useAuth();
   const google = useGoogleAuth();
   const facebook = useFacebookAuth();
 
@@ -37,6 +35,27 @@ export function SignUpScreen({ onNavigateToSignIn }: Props) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Redirect to main app once authenticated (covers email and social)
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace('/');
+    }
+  }, [isAuthenticated]);
+
+  async function handleSignUp() {
+    setError(null);
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setIsSubmitting(true);
+    const { error } = await signUp(fullName.trim(), email.trim(), password);
+    if (error) setError(error);
+    setIsSubmitting(false);
+  }
 
   return (
     <KeyboardAvoidingView
@@ -146,14 +165,22 @@ export function SignUpScreen({ onNavigateToSignIn }: Props) {
             </View>
           </View>
 
+          {/* Inline error */}
+          {error && <Text style={styles.errorText}>{error}</Text>}
+
           {/* Sign Up button */}
-          <Pressable onPress={signUp} style={styles.primaryButtonWrapper}>
+          <Pressable
+            onPress={handleSignUp}
+            disabled={isSubmitting}
+            style={[styles.primaryButtonWrapper, isSubmitting && styles.buttonDisabled]}>
             <LinearGradient
               colors={['#5B8DEF', '#3B6FD4']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Sign Up</Text>
+              {isSubmitting
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.primaryButtonText}>Sign Up</Text>}
             </LinearGradient>
           </Pressable>
 
@@ -171,7 +198,7 @@ export function SignUpScreen({ onNavigateToSignIn }: Props) {
             disabled={facebook.isLoading}>
             {facebook.isLoading
               ? <ActivityIndicator size="small" color={ResonaraTheme.text} />
-              : <Image style={styles.glow} source={require('@/assets/images/socmed/fb.png')} />}
+              : <Image style={styles.socialIcon} source={require('@/assets/images/socmed/fb.png')} />}
             <Text style={styles.socialButtonText}>Sign In with Facebook</Text>
           </Pressable>
 
@@ -182,7 +209,7 @@ export function SignUpScreen({ onNavigateToSignIn }: Props) {
             disabled={google.isLoading}>
             {google.isLoading
               ? <ActivityIndicator size="small" color={ResonaraTheme.text} />
-              : <Image style={styles.glow} source={require('@/assets/images/socmed/google.png')} />}
+              : <Image style={styles.socialIcon} source={require('@/assets/images/socmed/google.png')} />}
             <Text style={styles.socialButtonText}>Sign In with Google</Text>
           </Pressable>
         </View>
@@ -190,7 +217,7 @@ export function SignUpScreen({ onNavigateToSignIn }: Props) {
         {/* Sign In link */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Already have an account?{' '}</Text>
-          <Pressable onPress={onNavigateToSignIn} hitSlop={8}>
+          <Pressable onPress={() => router.back()} hitSlop={8}>
             <Text style={styles.footerLink}>Sign in</Text>
           </Pressable>
         </View>
@@ -303,6 +330,19 @@ const styles = StyleSheet.create({
   socialButtonDisabled: {
     opacity: 0.6,
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  errorText: {
+    color: '#FF3378',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: -4,
+  },
+  socialIcon: {
+    width: 20,
+    height: 20,
+  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -317,9 +357,5 @@ const styles = StyleSheet.create({
     color: ResonaraTheme.accent,
     fontSize: 13,
     fontWeight: '600',
-  },
-  glow: {
-    width: 20,
-    height: 20,
   },
 });

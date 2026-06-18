@@ -1,60 +1,31 @@
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { EditProfileModal } from '@/components/edit-profile-modal';
 import { ResonaraTheme } from '@/constants/theme';
-import { usePlayer, MOCK_TRACK } from '@/context/player';
+import { useAuth } from '@/context/auth';
+import { usePlayer } from '@/context/player';
+import { FollowsService } from '@/services/follows.service';
+import { SessionsService, type FeedSession } from '@/services/sessions.service';
+import type { Profile } from '@/types/database';
 
 type ProfileTab = 'activity' | 'history' | 'following';
 
-const FRIENDS_ACTIVITY = [
-  {
-    id: '1',
-    user: 'selenagomez',
-    initials: 'SG',
-    avatarColor: '#0D1A3D',
-    track: 'Calm Down',
-    artist: 'Rema, Selena Gomez',
-    time: '2m ago',
-    active: true,
-  },
-  {
-    id: '2',
-    user: 'traviskelce',
-    initials: 'TK',
-    avatarColor: '#0D2A1A',
-    track: 'Player\'s Anthem',
-    artist: 'Junior M.A.F.I.A.',
-    time: '15m ago',
-    active: false,
-  },
-  {
-    id: '3',
-    user: 'andreswift',
-    initials: 'AS',
-    avatarColor: '#2A0D3D',
-    track: 'All Too Well',
-    artist: 'Taylor Swift',
-    time: '22m ago',
-    active: true,
-  },
-];
-
-const HISTORY = [
-  { title: "All Too Well (10 Min Version)", artist: 'Taylor Swift', time: 'Just now' },
-  { title: "Anti-Hero", artist: 'Taylor Swift', time: '1h ago' },
-  { title: "Flowers", artist: 'Miley Cyrus', time: '2h ago' },
-  { title: "As It Was", artist: 'Harry Styles', time: 'Yesterday' },
-  { title: "Blinding Lights", artist: 'The Weeknd', time: 'Yesterday' },
-];
-
-const FOLLOWING = [
-  { user: 'selenagomez', initials: 'SG', avatarColor: '#0D1A3D', followers: '89M', active: true },
-  { user: 'taylorswift13', initials: 'TS', avatarColor: '#3D0C0C', followers: '240M', active: false },
-  { user: 'traviskelce', initials: 'TK', avatarColor: '#0D2A1A', followers: '4.2M', active: false },
-  { user: 'harrysstyles', initials: 'HS', avatarColor: '#1A2A0D', followers: '18M', active: true },
-];
+function initials(name: string) {
+  return name.split(' ').map((w) => w[0]?.toUpperCase() ?? '').slice(0, 2).join('');
+}
 
 interface Props {
   bottomInset: number;
@@ -62,8 +33,33 @@ interface Props {
 
 export function ProfileScreen({ bottomInset }: Props) {
   const [activeTab, setActiveTab] = useState<ProfileTab>('activity');
+  const [feedSessions, setFeedSessions] = useState<FeedSession[]>([]);
+  const [following, setFollowing] = useState<Profile[]>([]);
+  const [loadingFeed, setLoadingFeed] = useState(false);
+  const [loadingFollowing, setLoadingFollowing] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+
   const insets = useSafeAreaInsets();
-  const { currentTrack, isPlaying, play, openNowPlaying } = usePlayer();
+  const { user, signOut } = useAuth();
+  const { currentTrack, isPlaying, openNowPlaying, stop } = usePlayer();
+
+  function confirmSignOut() {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            await stop();   // stop audio before clearing session
+            await signOut();
+          },
+        },
+      ]
+    );
+  }
 
   const TABS: { id: ProfileTab; label: string }[] = [
     { id: 'activity', label: 'Activity' },
@@ -71,24 +67,43 @@ export function ProfileScreen({ bottomInset }: Props) {
     { id: 'following', label: 'Following' },
   ];
 
+  useEffect(() => {
+    if (activeTab === 'activity' && user) {
+      setLoadingFeed(true);
+      SessionsService.getFollowingFeed(user.id)
+        .then(setFeedSessions)
+        .catch(console.error)
+        .finally(() => setLoadingFeed(false));
+    }
+    if (activeTab === 'following' && user) {
+      setLoadingFollowing(true);
+      FollowsService.getFollowing(user.id)
+        .then(setFollowing)
+        .catch(console.error)
+        .finally(() => setLoadingFollowing(false));
+    }
+  }, [activeTab, user]);
+
+  const userInitials = user?.name ? initials(user.name) : '?';
+
   return (
     <View style={styles.container}>
+      <EditProfileModal visible={showEditProfile} onClose={() => setShowEditProfile(false)} />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
-        {/* Profile hero */}
+        {/* Hero */}
         <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
-          {/* Settings button */}
-          <View style={styles.heroActions}>
-            <Pressable>
-              <SymbolView name="gearshape" size={22} tintColor={ResonaraTheme.textSecondary} />
-            </Pressable>
-          </View>
+          <View style={styles.heroActions} />
 
           {/* Avatar */}
           <View style={styles.avatarWrapper}>
             <View style={styles.avatarRing as any}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>KM</Text>
-              </View>
+              {user?.avatar ? (
+                <Image source={{ uri: user.avatar }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{userInitials}</Text>
+                </View>
+              )}
             </View>
             {isPlaying && (
               <View style={styles.nowPlayingBadge}>
@@ -97,36 +112,15 @@ export function ProfileScreen({ bottomInset }: Props) {
             )}
           </View>
 
-          {/* Name & handle */}
-          <Text style={styles.displayName}>Kenneth M.</Text>
-          <Text style={styles.handle}>@kennethmontealto</Text>
-          <Text style={styles.bio}>Music is life 🎵 Always listening.</Text>
+          <Text style={styles.displayName}>{user?.name ?? 'User'}</Text>
+          <Text style={styles.handle}>@{user?.username ?? user?.email?.split('@')[0] ?? ''}</Text>
 
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>124</Text>
-              <Text style={styles.statLabel}>Following</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>89</Text>
-              <Text style={styles.statLabel}>Followers</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>42</Text>
-              <Text style={styles.statLabel}>Friends</Text>
-            </View>
-          </View>
-
-          {/* Action buttons */}
           <View style={styles.profileButtons}>
-            <Pressable style={styles.editBtn}>
+            <Pressable style={styles.editBtn} onPress={() => setShowEditProfile(true)}>
               <Text style={styles.editBtnText}>Edit Profile</Text>
             </Pressable>
-            <Pressable style={styles.shareBtn}>
-              <SymbolView name="square.and.arrow.up" size={16} tintColor={ResonaraTheme.textSecondary} />
+            <Pressable style={styles.logoutBtn} onPress={confirmSignOut} hitSlop={8}>
+              <Ionicons name="log-out-outline" size={22} color={ResonaraTheme.accentPink} />
             </Pressable>
           </View>
         </View>
@@ -135,8 +129,10 @@ export function ProfileScreen({ bottomInset }: Props) {
         {currentTrack && (
           <Pressable style={styles.nowPlayingCard} onPress={openNowPlaying}>
             <View style={styles.nowPlayingLeft}>
-              <View style={[styles.nowPlayingThumb, styles.nowPlayingThumbBg as any]}>
-                <Text style={styles.nowPlayingThumbText}>RED</Text>
+              <View style={styles.nowPlayingThumb}>
+                <Text style={styles.nowPlayingThumbText} numberOfLines={1}>
+                  {currentTrack.album?.slice(0, 3).toUpperCase() ?? '♪'}
+                </Text>
               </View>
               <View style={styles.nowPlayingInfo}>
                 <View style={styles.nowPlayingLabelRow}>
@@ -161,66 +157,79 @@ export function ProfileScreen({ bottomInset }: Props) {
           ))}
         </View>
 
-        {/* Activity tab */}
+        {/* Activity */}
         {activeTab === 'activity' && (
           <View style={styles.tabContent}>
-            <Text style={styles.tabSectionLabel}>Friends Listening Now</Text>
-            {FRIENDS_ACTIVITY.map((f) => (
-              <Pressable
-                key={f.id}
-                style={styles.activityRow}
-                onPress={() => { play(MOCK_TRACK); openNowPlaying(); }}>
-                <View style={[styles.friendAvatar, { backgroundColor: f.avatarColor }, f.active && styles.friendAvatarActive]}>
-                  <Text style={styles.friendInitials}>{f.initials}</Text>
-                  {f.active && <View style={styles.onlineDot} />}
-                </View>
-                <View style={styles.activityInfo}>
-                  <Text style={styles.activityUser}>{f.user}</Text>
-                  <Text style={styles.activityTrack} numberOfLines={1}>{f.track} · {f.artist}</Text>
-                </View>
-                <Text style={styles.activityTime}>{f.time}</Text>
-              </Pressable>
-            ))}
+            {loadingFeed ? (
+              <ActivityIndicator style={styles.loader} color={ResonaraTheme.accent} />
+            ) : feedSessions.length === 0 ? (
+              <View style={styles.emptyState}>
+                <SymbolView name="music.note" size={36} tintColor={ResonaraTheme.textMuted} />
+                <Text style={styles.emptyText}>No activity yet</Text>
+                <Text style={styles.emptySubText}>Follow people to see what they're listening to</Text>
+              </View>
+            ) : (
+              feedSessions.map((s) => {
+                const t = s.tracks;
+                const p = s.profiles;
+                return (
+                  <View key={s.id} style={styles.activityRow}>
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendInitials}>{initials(p.username)}</Text>
+                    </View>
+                    <View style={styles.activityInfo}>
+                      <Text style={styles.activityUser}>@{p.username}</Text>
+                      <Text style={styles.activityTrack} numberOfLines={1}>
+                        {t?.title ?? 'Unknown'} · {t?.artist ?? ''}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
         )}
 
-        {/* History tab */}
+        {/* History */}
         {activeTab === 'history' && (
-          <View style={styles.tabContent}>
-            {HISTORY.map((h, i) => (
-              <Pressable
-                key={i}
-                style={styles.historyRow}
-                onPress={() => { play(MOCK_TRACK); openNowPlaying(); }}>
-                <View style={styles.historyThumb} />
-                <View style={styles.historyInfo}>
-                  <Text style={styles.historyTitle}>{h.title}</Text>
-                  <Text style={styles.historyArtist}>{h.artist}</Text>
-                </View>
-                <Text style={styles.historyTime}>{h.time}</Text>
-              </Pressable>
-            ))}
+          <View style={styles.emptyState}>
+            <SymbolView name="clock" size={36} tintColor={ResonaraTheme.textMuted} />
+            <Text style={styles.emptyText}>No history yet</Text>
+            <Text style={styles.emptySubText}>Your listening history will appear here</Text>
           </View>
         )}
 
-        {/* Following tab */}
+        {/* Following */}
         {activeTab === 'following' && (
           <View style={styles.tabContent}>
-            {FOLLOWING.map((f) => (
-              <View key={f.user} style={styles.followingRow}>
-                <View style={[styles.followingAvatar, { backgroundColor: f.avatarColor }, f.active && styles.followingAvatarActive]}>
-                  <Text style={styles.followingInitials}>{f.initials}</Text>
-                  {f.active && <View style={styles.onlineDot} />}
-                </View>
-                <View style={styles.followingInfo}>
-                  <Text style={styles.followingUser}>{f.user}</Text>
-                  <Text style={styles.followingFollowers}>{f.followers} followers</Text>
-                </View>
-                <Pressable style={styles.followingBtn}>
-                  <Text style={styles.followingBtnText}>Following</Text>
-                </Pressable>
+            {loadingFollowing ? (
+              <ActivityIndicator style={styles.loader} color={ResonaraTheme.accent} />
+            ) : following.length === 0 ? (
+              <View style={styles.emptyState}>
+                <SymbolView name="person.2" size={36} tintColor={ResonaraTheme.textMuted} />
+                <Text style={styles.emptyText}>Not following anyone yet</Text>
+                <Text style={styles.emptySubText}>Search for people to follow</Text>
               </View>
-            ))}
+            ) : (
+              following.map((f) => (
+                <View key={f.id} style={styles.followingRow}>
+                  {f.avatar_url ? (
+                    <Image source={{ uri: f.avatar_url }} style={styles.followingAvatarImg} />
+                  ) : (
+                    <View style={styles.followingAvatar}>
+                      <Text style={styles.followingInitials}>{initials(f.username)}</Text>
+                    </View>
+                  )}
+                  <View style={styles.followingInfo}>
+                    <Text style={styles.followingUser}>@{f.username}</Text>
+                    {f.full_name && <Text style={styles.followingName}>{f.full_name}</Text>}
+                  </View>
+                  <Pressable style={styles.followingBtn}>
+                    <Text style={styles.followingBtnText}>Following</Text>
+                  </Pressable>
+                </View>
+              ))
+            )}
           </View>
         )}
       </ScrollView>
@@ -229,358 +238,121 @@ export function ProfileScreen({ bottomInset }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: ResonaraTheme.background,
-  },
-  hero: {
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  heroActions: {
-    alignSelf: 'flex-end',
-    paddingBottom: 8,
-  },
-  avatarWrapper: {
-    position: 'relative',
-    marginBottom: 12,
-  },
+  container: { flex: 1, backgroundColor: ResonaraTheme.background },
+  hero: { alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 },
+  heroActions: { alignSelf: 'flex-end', paddingBottom: 8 },
+  avatarWrapper: { position: 'relative', marginBottom: 12 },
   avatarRing: {
-    padding: 3,
-    borderRadius: 46,
+    padding: 3, borderRadius: 46,
     experimental_backgroundImage: 'linear-gradient(135deg, #FF3378, #9B51E0)',
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: ResonaraTheme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: ResonaraTheme.background,
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: ResonaraTheme.surface, justifyContent: 'center', alignItems: 'center',
   },
-  avatarText: {
-    color: ResonaraTheme.text,
-    fontSize: 26,
-    fontWeight: '700',
-  },
+  avatarImg: { width: 80, height: 80, borderRadius: 40 },
+  avatarText: { color: ResonaraTheme.text, fontSize: 24, fontWeight: '700' },
   nowPlayingBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    position: 'absolute', bottom: 0, right: 0,
+    width: 22, height: 22, borderRadius: 11,
     backgroundColor: ResonaraTheme.accentPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: ResonaraTheme.background,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: ResonaraTheme.background,
   },
-  displayName: {
-    color: ResonaraTheme.text,
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  handle: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 14,
-    marginTop: 2,
-  },
-  bio: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 13,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 16,
-  },
-  stat: {
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  statNumber: {
-    color: ResonaraTheme.text,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  statLabel: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: ResonaraTheme.border,
-  },
-  profileButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
+  displayName: { color: ResonaraTheme.text, fontSize: 20, fontWeight: '700', marginBottom: 2 },
+  handle: { color: ResonaraTheme.textSecondary, fontSize: 14, marginBottom: 16 },
+  profileButtons: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   editBtn: {
-    backgroundColor: ResonaraTheme.surface,
-    borderRadius: 20,
-    paddingHorizontal: 28,
-    paddingVertical: 9,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ResonaraTheme.border,
+    borderWidth: 1, borderColor: ResonaraTheme.border, borderRadius: 20,
+    paddingHorizontal: 24, paddingVertical: 8,
   },
-  editBtnText: {
-    color: ResonaraTheme.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  shareBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: ResonaraTheme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ResonaraTheme.border,
+  editBtnText: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '600' },
+  logoutBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: ResonaraTheme.accentPink,
+    justifyContent: 'center', alignItems: 'center',
   },
   nowPlayingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: ResonaraTheme.surface,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ResonaraTheme.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: 16, marginVertical: 8, padding: 12,
+    backgroundColor: ResonaraTheme.surface, borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ResonaraTheme.border,
   },
-  nowPlayingLeft: {
-    flex: 1,
+  nowPlayingLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  nowPlayingThumb: {
+    width: 44, height: 44, borderRadius: 8,
+    backgroundColor: '#2A0808', justifyContent: 'center', alignItems: 'center',
+  },
+  nowPlayingThumbText: { color: 'rgba(160,20,20,0.8)', fontSize: 10, fontWeight: '900' },
+  nowPlayingInfo: { flex: 1 },
+  nowPlayingLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  nowPlayingLabel: { color: ResonaraTheme.accentPink, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  nowPlayingTitle: { color: ResonaraTheme.text, fontSize: 13, fontWeight: '600' },
+  nowPlayingArtist: { color: ResonaraTheme.textSecondary, fontSize: 11, marginTop: 1 },
+  tabBar: {
+    flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ResonaraTheme.border, marginTop: 8,
+  },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 12, position: 'relative' },
+  tabText: { color: ResonaraTheme.textMuted, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: ResonaraTheme.text, fontWeight: '700' },
+  tabIndicator: {
+    position: 'absolute', bottom: 0, left: 16, right: 16,
+    height: 2, backgroundColor: ResonaraTheme.text, borderRadius: 1,
+  },
+  tabContent: { paddingTop: 4 },
+  loader: { marginTop: 40 },
+  emptyState: { alignItems: 'center', paddingTop: 48, paddingHorizontal: 32, gap: 8 },
+  emptyText: { color: ResonaraTheme.textSecondary, fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  emptySubText: { color: ResonaraTheme.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  activityRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, gap: 12,
+  },
+  friendAvatar: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: ResonaraTheme.surface, justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: ResonaraTheme.border,
+  },
+  friendInitials: { color: ResonaraTheme.text, fontSize: 13, fontWeight: '700' },
+  activityInfo: { flex: 1 },
+  activityUser: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '600' },
+  activityTrack: { color: ResonaraTheme.textSecondary, fontSize: 12, marginTop: 2 },
+  followingRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 10, gap: 12,
+  },
+  followingAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: ResonaraTheme.surface, justifyContent: 'center', alignItems: 'center',
+  },
+  followingAvatarImg: { width: 44, height: 44, borderRadius: 22 },
+  followingInitials: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '700' },
+  followingInfo: { flex: 1 },
+  followingUser: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '600' },
+  followingName: { color: ResonaraTheme.textSecondary, fontSize: 12, marginTop: 1 },
+  followingBtn: {
+    borderWidth: 1, borderColor: ResonaraTheme.border, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  followingBtnText: { color: ResonaraTheme.textSecondary, fontSize: 12, fontWeight: '600' },
+  signOutSection: {
+    marginTop: 24,
+    marginHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: ResonaraTheme.border,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  signOutRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingVertical: 14,
   },
-  nowPlayingThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  nowPlayingThumbBg: {
-    experimental_backgroundImage: 'linear-gradient(180deg, #3D0C0C, #0D0208)',
-  },
-  nowPlayingThumbText: {
-    color: 'rgba(160,20,20,0.8)',
-    fontSize: 11,
-    fontWeight: '900',
-    fontStyle: 'italic',
-  },
-  nowPlayingInfo: {
-    flex: 1,
-  },
-  nowPlayingLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 2,
-  },
-  nowPlayingLabel: {
+  signOutText: {
     color: ResonaraTheme.accentPink,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  nowPlayingTitle: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  nowPlayingArtist: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 11,
-    marginTop: 1,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ResonaraTheme.border,
-    marginTop: 16,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    position: 'relative',
-  },
-  tabText: {
-    color: ResonaraTheme.textMuted,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    color: ResonaraTheme.text,
-  },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    left: '20%',
-    right: '20%',
-    height: 2,
-    backgroundColor: ResonaraTheme.text,
-    borderRadius: 1,
-  },
-  tabContent: {
-    paddingTop: 8,
-    paddingHorizontal: 16,
-  },
-  tabSectionLabel: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ResonaraTheme.border,
-  },
-  friendAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  friendAvatarActive: {
-    borderWidth: 2,
-    borderColor: ResonaraTheme.accentPink,
-  },
-  friendInitials: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  onlineDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-    backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: ResonaraTheme.background,
-  },
-  activityInfo: {
-    flex: 1,
-  },
-  activityUser: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  activityTrack: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  activityTime: {
-    color: ResonaraTheme.textMuted,
-    fontSize: 11,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ResonaraTheme.border,
-  },
-  historyThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 6,
-    backgroundColor: ResonaraTheme.surface,
-    borderWidth: 1,
-    borderColor: ResonaraTheme.border,
-  },
-  historyInfo: {
-    flex: 1,
-  },
-  historyTitle: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  historyArtist: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  historyTime: {
-    color: ResonaraTheme.textMuted,
-    fontSize: 11,
-  },
-  followingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ResonaraTheme.border,
-  },
-  followingAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  followingAvatarActive: {
-    borderWidth: 2,
-    borderColor: ResonaraTheme.accentPink,
-  },
-  followingInitials: {
-    color: ResonaraTheme.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  followingInfo: {
-    flex: 1,
-  },
-  followingUser: {
-    color: ResonaraTheme.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  followingFollowers: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  followingBtn: {
-    borderWidth: 1,
-    borderColor: ResonaraTheme.border,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  followingBtnText: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '600',
   },
 });

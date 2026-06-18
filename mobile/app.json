@@ -22,7 +22,7 @@
       "package": "com.soltryxsolution.resonara"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [

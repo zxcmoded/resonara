@@ -1,52 +1,40 @@
-import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useState } from 'react';
+import { makeRedirectUri } from 'expo-auth-session';
+import { useState } from 'react';
 
-import { OAUTH_CONFIG } from '@/constants/oauth';
-import { useAuth } from '@/context/auth';
+import { supabase } from '@/lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
+const redirectUri = makeRedirectUri({ scheme: 'mobile', path: 'auth-callback' });
+
 export function useFacebookAuth() {
-  const { socialSignIn } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
-  const [request, response, promptAsync] = Facebook.useAuthRequest({
-    clientId: OAUTH_CONFIG.facebook.appId,
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      fetchUserInfo(response.authentication?.accessToken ?? '');
-    } else if (response?.type === 'error' || response?.type === 'dismiss') {
-      setIsLoading(false);
-    }
-  }, [response]);
-
-  async function fetchUserInfo(token: string) {
+  async function handleSignIn() {
+    setIsLoading(true);
     try {
-      const res = await fetch(
-        `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${token}`
-      );
-      const data = await res.json();
-      socialSignIn({
-        id: data.id,
-        name: data.name,
-        email: data.email,
-        avatar: data.picture?.data?.url,
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'facebook',
+        options: { redirectTo: redirectUri, skipBrowserRedirect: true },
       });
+
+      if (error || !data.url) {
+        console.error('Facebook OAuth error:', error?.message);
+        return;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+
+      if (result.type === 'success') {
+        await supabase.auth.exchangeCodeForSession(result.url);
+      }
     } catch (err) {
-      console.error('Facebook profile fetch failed:', err);
+      console.error('Facebook sign-in failed:', err);
     } finally {
       setIsLoading(false);
     }
   }
 
-  function handleSignIn() {
-    setIsLoading(true);
-    promptAsync();
-  }
-
-  return { handleSignIn, isLoading: isLoading || !request };
+  return { handleSignIn, isLoading };
 }

@@ -1,190 +1,211 @@
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ResonaraTheme } from '@/constants/theme';
-import { usePlayer, MOCK_TRACK } from '@/context/player';
+import { useAuth } from '@/context/auth';
+import { usePlayer } from '@/context/player';
+import { AlbumsService } from '@/services/albums.service';
+import { TracksService } from '@/services/tracks.service';
+import type { Album, TrackWithAlbum } from '@/types/database';
 
-type Filter = 'playlists' | 'albums' | 'artists';
+type Filter = 'albums' | 'songs';
 
-const PLAYLISTS = [
-  {
-    id: '1',
-    name: 'Liked Songs',
-    subtitle: '247 songs',
-    isLiked: true,
-    color: '#5B8DEF',
-  },
-  {
-    id: '2',
-    name: 'Late Night Drives',
-    subtitle: 'By you • 34 songs',
-    isLiked: false,
-    color: '#1A1E35',
-  },
-  {
-    id: '3',
-    name: 'Taylor Swift Radio',
-    subtitle: 'Based on Taylor Swift • 50 songs',
-    isLiked: false,
-    color: '#3D0C0C',
-  },
-  {
-    id: '4',
-    name: 'Workout Mix 2024',
-    subtitle: 'By you • 28 songs',
-    isLiked: false,
-    color: '#0D2A1A',
-  },
-  {
-    id: '5',
-    name: 'Chill Vibes',
-    subtitle: 'By selenagomez • 41 songs',
-    isLiked: false,
-    color: '#1A0D2A',
-  },
-];
+function formatDuration(ms: number | null): string {
+  if (!ms) return '';
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
-const ALBUMS = [
-  { id: '1', name: 'Red (Taylor\'s Version)', artist: 'Taylor Swift', year: '2021', color: '#3D0C0C' },
-  { id: '2', name: 'Harry\'s House', artist: 'Harry Styles', year: '2022', color: '#1A2A0D' },
-  { id: '3', name: 'Endless Summer Vacation', artist: 'Miley Cyrus', year: '2023', color: '#0D1A3D' },
-];
+function AlbumCard({ album, onPress }: { album: Album; onPress: () => void }) {
+  return (
+    <Pressable style={styles.albumCard} onPress={onPress}>
+      {album.artwork_url ? (
+        <Image source={{ uri: album.artwork_url }} style={styles.albumArt} contentFit="cover" />
+      ) : (
+        <View style={[styles.albumArt, styles.albumArtFallback]}>
+          <SymbolView name="music.note" size={28} tintColor={ResonaraTheme.textMuted} />
+        </View>
+      )}
+      <Text style={styles.albumTitle} numberOfLines={1}>{album.title}</Text>
+      <Text style={styles.albumArtist} numberOfLines={1}>{album.artist}</Text>
+      {album.release_year && (
+        <Text style={styles.albumYear}>{album.release_year}</Text>
+      )}
+    </Pressable>
+  );
+}
 
-const FOLLOWED_ARTISTS = [
-  { id: '1', name: 'Taylor Swift', followers: '89.4M', active: true },
-  { id: '2', name: 'Harry Styles', followers: '52.1M', active: false },
-  { id: '3', name: 'Miley Cyrus', followers: '44.8M', active: true },
-  { id: '4', name: 'The Weeknd', followers: '61.2M', active: false },
-  { id: '5', name: 'Olivia Rodrigo', followers: '38.7M', active: false },
-];
-
-const RECENT_TRACKS = [
-  { title: "Anti-Hero", artist: 'Taylor Swift' },
-  { title: "Flowers", artist: 'Miley Cyrus' },
-  { title: "As It Was", artist: 'Harry Styles' },
-];
+function TrackRow({ track, onPress }: { track: TrackWithAlbum; onPress: () => void }) {
+  const artwork = track.artwork_url ?? track.albums?.artwork_url;
+  return (
+    <Pressable style={styles.trackRow} onPress={onPress}>
+      {artwork ? (
+        <Image source={{ uri: artwork }} style={styles.trackThumb} contentFit="cover" />
+      ) : (
+        <View style={[styles.trackThumb, styles.trackThumbFallback]}>
+          <SymbolView name="music.note" size={16} tintColor={ResonaraTheme.textMuted} />
+        </View>
+      )}
+      <View style={styles.trackInfo}>
+        <Text style={styles.trackTitle} numberOfLines={1}>{track.title}</Text>
+        <Text style={styles.trackArtist} numberOfLines={1}>
+          {track.artist}{track.albums ? ` · ${track.albums.title}` : ''}
+        </Text>
+      </View>
+      <Text style={styles.trackDuration}>{formatDuration(track.duration_ms)}</Text>
+      <SymbolView name="play.fill" size={12} tintColor={ResonaraTheme.textMuted} />
+    </Pressable>
+  );
+}
 
 interface Props {
   bottomInset: number;
 }
 
 export function LibraryScreen({ bottomInset }: Props) {
-  const [filter, setFilter] = useState<Filter>('playlists');
+  const [filter, setFilter] = useState<Filter>('albums');
+  const [albums, setAlbums] = useState<Album[]>([]);
+  const [tracks, setTracks] = useState<TrackWithAlbum[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const { play, openNowPlaying } = usePlayer();
 
   const FILTERS: { id: Filter; label: string }[] = [
-    { id: 'playlists', label: 'Playlists' },
     { id: 'albums', label: 'Albums' },
-    { id: 'artists', label: 'Artists' },
+    { id: 'songs', label: 'Songs' },
   ];
+
+  async function loadData(isRefresh = false) {
+    isRefresh ? setRefreshing(true) : setLoading(true);
+    try {
+      const [albumsData, tracksData] = await Promise.all([
+        AlbumsService.getAll(),
+        TracksService.getRecent(50),
+      ]);
+      setAlbums(albumsData);
+      setTracks(tracksData);
+    } catch (e) {
+      console.error('Library load failed:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  function handlePlayTrack(track: TrackWithAlbum) {
+    const artwork = track.artwork_url ?? track.albums?.artwork_url ?? null;
+    play({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.albums?.title ?? '',
+      artworkUrl: artwork,
+      audioUrl: track.audio_url,
+      progressSec: 0,
+      durationSec: Math.floor((track.duration_ms ?? 0) / 1000),
+      queue: [],
+    });
+    openNowPlaying();
+  }
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.headerRow}>
-          <Text style={styles.screenTitle}>Your Library</Text>
-          <Pressable style={styles.addBtn}>
-            <SymbolView name="plus" size={18} tintColor={ResonaraTheme.text} />
-          </Pressable>
-        </View>
-
-        {/* Filter chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
-          {FILTERS.map((f) => (
-            <Pressable
-              key={f.id}
-              style={[styles.filterChip, filter === f.id && styles.filterChipActive]}
-              onPress={() => setFilter(f.id)}>
-              <Text style={[styles.filterText, filter === f.id && styles.filterTextActive]}>
-                {f.label}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <Text style={styles.screenTitle}>Library</Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
+      {/* Filter pills */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filtersRow}>
+        {FILTERS.map((f) => (
+          <Pressable
+            key={f.id}
+            style={[styles.filterPill, filter === f.id && styles.filterPillActive]}
+            onPress={() => setFilter(f.id)}>
+            <Text style={[styles.filterPillText, filter === f.id && styles.filterPillTextActive]}>
+              {f.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
-        {/* Recently played */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Recently Played</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentRow}>
-            {RECENT_TRACKS.map((t, i) => (
-              <Pressable
-                key={i}
-                style={styles.recentCard}
-                onPress={() => { play(MOCK_TRACK); openNowPlaying(); }}>
-                <View style={[styles.recentArt, { backgroundColor: i === 0 ? '#3D0C0C' : i === 1 ? '#0D1A3D' : '#1A2A0D' }]} />
-                <Text style={styles.recentTitle} numberOfLines={1}>{t.title}</Text>
-                <Text style={styles.recentArtist} numberOfLines={1}>{t.artist}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Playlists */}
-        {filter === 'playlists' && (
-          <View style={styles.section}>
-            {PLAYLISTS.map((pl) => (
-              <Pressable
-                key={pl.id}
-                style={styles.listItem}
-                onPress={() => { play(MOCK_TRACK); openNowPlaying(); }}>
-                <View style={[styles.listThumb, { backgroundColor: pl.color }]}>
-                  {pl.isLiked && (
-                    <SymbolView name="heart.fill" size={22} tintColor="#FFFFFF" />
-                  )}
-                </View>
-                <View style={styles.listInfo}>
-                  <Text style={styles.listName}>{pl.name}</Text>
-                  <Text style={styles.listSub}>{pl.subtitle}</Text>
-                </View>
-                <SymbolView name="ellipsis" size={18} tintColor={ResonaraTheme.textMuted} />
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        {/* Albums */}
-        {filter === 'albums' && (
-          <View style={styles.section}>
-            {ALBUMS.map((al) => (
-              <Pressable
-                key={al.id}
-                style={styles.listItem}
-                onPress={() => { play(MOCK_TRACK); openNowPlaying(); }}>
-                <View style={[styles.listThumb, { backgroundColor: al.color }]} />
-                <View style={styles.listInfo}>
-                  <Text style={styles.listName}>{al.name}</Text>
-                  <Text style={styles.listSub}>{al.artist} • {al.year}</Text>
-                </View>
-                <SymbolView name="ellipsis" size={18} tintColor={ResonaraTheme.textMuted} />
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        {/* Artists */}
-        {filter === 'artists' && (
-          <View style={styles.section}>
-            {FOLLOWED_ARTISTS.map((artist) => (
-              <Pressable key={artist.id} style={styles.listItem}>
-                <View style={[styles.artistAvatar, artist.active && styles.artistAvatarActive]}>
-                  <Text style={styles.artistInitials}>{artist.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</Text>
-                  {artist.active && <View style={styles.activeDot} />}
-                </View>
-                <View style={styles.listInfo}>
-                  <Text style={styles.listName}>{artist.name}</Text>
-                  <Text style={styles.listSub}>{artist.followers} followers{artist.active ? ' • listening now' : ''}</Text>
-                </View>
-                <SymbolView name="chevron.right" size={14} tintColor={ResonaraTheme.textMuted} />
-              </Pressable>
-            ))}
-          </View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadData(true)}
+            tintColor={ResonaraTheme.accent}
+          />
+        }>
+        {loading ? (
+          <ActivityIndicator style={styles.loader} color={ResonaraTheme.accent} />
+        ) : filter === 'albums' ? (
+          albums.length === 0 ? (
+            <View style={styles.emptyState}>
+              <SymbolView name="square.stack" size={48} tintColor={ResonaraTheme.textMuted} />
+              <Text style={styles.emptyTitle}>No albums yet</Text>
+              <Text style={styles.emptySub}>
+                Albums uploaded to Resonara will appear here
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.albumGrid}>
+              {albums.map((album) => (
+                <AlbumCard
+                  key={album.id}
+                  album={album}
+                  onPress={() => {
+                    // TODO: navigate to album detail screen
+                  }}
+                />
+              ))}
+            </View>
+          )
+        ) : (
+          tracks.length === 0 ? (
+            <View style={styles.emptyState}>
+              <SymbolView name="music.note.list" size={48} tintColor={ResonaraTheme.textMuted} />
+              <Text style={styles.emptyTitle}>No songs yet</Text>
+              <Text style={styles.emptySub}>
+                Songs uploaded to Resonara will appear here
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.trackList}>
+              {tracks.map((track) => (
+                <TrackRow
+                  key={track.id}
+                  track={track}
+                  onPress={() => handlePlayTrack(track)}
+                />
+              ))}
+            </View>
+          )
         )}
       </ScrollView>
     </View>
@@ -192,147 +213,59 @@ export function LibraryScreen({ bottomInset }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: ResonaraTheme.background,
-  },
+  container: { flex: 1, backgroundColor: ResonaraTheme.background },
   header: {
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-    gap: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingBottom: 12,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  screenTitle: {
-    color: ResonaraTheme.text,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  screenTitle: { color: ResonaraTheme.text, fontSize: 28, fontWeight: '700' },
+  filtersRow: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  filterPill: {
+    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20,
     backgroundColor: ResonaraTheme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ResonaraTheme.border,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ResonaraTheme.border,
   },
-  filtersRow: {
-    gap: 8,
-    paddingRight: 8,
+  filterPillActive: { backgroundColor: ResonaraTheme.text },
+  filterPillText: { color: ResonaraTheme.textSecondary, fontSize: 13, fontWeight: '600' },
+  filterPillTextActive: { color: ResonaraTheme.background },
+  content: { flexGrow: 1 },
+  loader: { marginTop: 48 },
+  emptyState: {
+    alignItems: 'center', paddingTop: 72, paddingHorizontal: 40, gap: 12,
   },
-  filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 20,
+  emptyTitle: { color: ResonaraTheme.textSecondary, fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  emptySub: { color: ResonaraTheme.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 20 },
+
+  // Albums grid (2 columns)
+  albumGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, gap: 16,
+  },
+  albumCard: { width: '46%' },
+  albumArt: { width: '100%', aspectRatio: 1, borderRadius: 8, marginBottom: 6 },
+  albumArtFallback: {
     backgroundColor: ResonaraTheme.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ResonaraTheme.border,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ResonaraTheme.border,
   },
-  filterChipActive: {
-    backgroundColor: ResonaraTheme.text,
+  albumTitle: { color: ResonaraTheme.text, fontSize: 13, fontWeight: '600' },
+  albumArtist: { color: ResonaraTheme.textSecondary, fontSize: 12, marginTop: 2 },
+  albumYear: { color: ResonaraTheme.textMuted, fontSize: 11, marginTop: 1 },
+
+  // Tracks list
+  trackList: { paddingHorizontal: 16 },
+  trackRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 10, gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: ResonaraTheme.border,
   },
-  filterText: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  filterTextActive: {
-    color: ResonaraTheme.background,
-  },
-  section: {
-    paddingTop: 16,
-    paddingHorizontal: 16,
-  },
-  sectionLabel: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-  },
-  recentRow: {
-    gap: 12,
-    paddingRight: 8,
-  },
-  recentCard: {
-    width: 120,
-  },
-  recentArt: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  recentTitle: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  recentArtist: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  listItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: ResonaraTheme.border,
-  },
-  listThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listInfo: {
-    flex: 1,
-  },
-  listName: {
-    color: ResonaraTheme.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  listSub: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  artistAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  trackThumb: { width: 44, height: 44, borderRadius: 6 },
+  trackThumbFallback: {
     backgroundColor: ResonaraTheme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: ResonaraTheme.border,
   },
-  artistAvatarActive: {
-    borderWidth: 2,
-    borderColor: ResonaraTheme.accentPink,
-  },
-  artistInitials: {
-    color: ResonaraTheme.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  activeDot: {
-    position: 'absolute',
-    bottom: 1,
-    right: 1,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: ResonaraTheme.background,
-  },
+  trackInfo: { flex: 1 },
+  trackTitle: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '600' },
+  trackArtist: { color: ResonaraTheme.textSecondary, fontSize: 12, marginTop: 2 },
+  trackDuration: { color: ResonaraTheme.textMuted, fontSize: 12 },
 });

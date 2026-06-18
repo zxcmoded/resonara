@@ -1,7 +1,10 @@
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,37 +12,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ResonaraTheme } from '@/constants/theme';
 import { ListenTogetherView } from '@/components/listen-together-view';
-import { usePlayer, MOCK_TRACK as PLAYER_TRACK } from '@/context/player';
-
-export type MockTrack = {
-  artist: { name: string; verified: boolean };
-  album: string;
-  albumArtist: string;
-  trackTitle: string;
-  progressSec: number;
-  durationSec: number;
-  queue: string[];
-};
-
-const MOCK_TRACK: MockTrack = {
-  artist: { name: 'Taylor Swift', verified: true },
-  album: 'Red',
-  albumArtist: 'Taylor Swift',
-  trackTitle: "All Too Well (10 Minute Version) (Taylor's Version) [From The Vault]",
-  progressSec: 98,
-  durationSec: 613,
-  queue: ["Sad Beautiful Tragic (Taylor's Version)"],
-};
-
-type SubTab = 'friends' | 'following' | 'topArtists';
-
-const SUB_TABS: { id: SubTab; label: string }[] = [
-  { id: 'friends', label: 'Friends' },
-  { id: 'following', label: 'Following' },
-  { id: 'topArtists', label: 'Top Artists' },
-];
+import { ResonaraTheme } from '@/constants/theme';
+import { useAuth } from '@/context/auth';
+import { usePlayer } from '@/context/player';
+import { SessionsService, sessionToPlayerTrack, type FeedSession } from '@/services/sessions.service';
 
 function formatTime(sec: number) {
   const m = Math.floor(sec / 60);
@@ -47,68 +24,94 @@ function formatTime(sec: number) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function ActivityCard({ track, onListenTogether, onPlay }: { track: MockTrack; onListenTogether: () => void; onPlay: () => void }) {
-  const progressPercent = (track.progressSec / track.durationSec) * 100;
+function initials(name: string) {
+  return name
+    .split(' ')
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .slice(0, 2)
+    .join('');
+}
+
+function ActivityCard({
+  session,
+  onListenTogether,
+  onPlay,
+}: {
+  session: FeedSession;
+  onListenTogether: () => void;
+  onPlay: () => void;
+}) {
+  const track = session.tracks;
+  const profile = session.profiles;
+  const progressSec = Math.floor(session.position_ms / 1000);
+  const durationSec = Math.floor((track?.duration_ms ?? 0) / 1000);
+  const progressPercent = durationSec > 0 ? (progressSec / durationSec) * 100 : 0;
+  const userInitials = initials(profile.username);
 
   return (
     <View style={styles.card}>
-      {/* Artist header */}
+      {/* Host header */}
       <View style={styles.artistRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarInitials}>TS</Text>
-        </View>
-        <View style={styles.artistInfo}>
-          <View style={styles.artistNameRow}>
-            <Text style={styles.artistName}>{track.artist.name}</Text>
-            {track.artist.verified && (
-              <SymbolView name="checkmark.seal.fill" size={15} tintColor={ResonaraTheme.verified} />
-            )}
+        {profile.avatar_url ? (
+          <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+        ) : (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarInitials}>{userInitials}</Text>
           </View>
-          <Text style={styles.listeningTo}>
-            Now listening to:{' '}
-            <Text style={styles.listeningToLink}>{track.album}</Text>
-            {' '}by{' '}
-            <Text style={styles.listeningToLink}>{track.albumArtist}</Text>
-          </Text>
+        )}
+        <View style={styles.artistInfo}>
+          <Text style={styles.artistName}>@{profile.username}</Text>
+          {track && (
+            <Text style={styles.listeningTo}>
+              Now listening to:{' '}
+              <Text style={styles.listeningToLink}>{track.album ?? track.title}</Text>
+              {' '}by{' '}
+              <Text style={styles.listeningToLink}>{track.artist}</Text>
+            </Text>
+          )}
         </View>
       </View>
 
-      {/* Album art — tap to open Now Playing */}
+      {/* Album art */}
       <Pressable style={styles.albumArt as any} onPress={onPlay}>
-        <View style={styles.albumGradient as any} />
-        <View style={styles.albumTextOverlay}>
-          <Text style={styles.albumTitleText}>RED</Text>
-          <Text style={styles.albumArtistText}>TAYLOR SWIFT</Text>
-        </View>
+        {track?.artwork_url ? (
+          <Image source={{ uri: track.artwork_url }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        ) : (
+          <>
+            <View style={styles.albumGradient as any} />
+            <View style={styles.albumTextOverlay}>
+              <Text style={styles.albumTitleText} numberOfLines={1}>
+                {track?.album?.toUpperCase() ?? track?.title?.toUpperCase() ?? '—'}
+              </Text>
+              <Text style={styles.albumArtistText} numberOfLines={1}>
+                {track?.artist?.toUpperCase() ?? ''}
+              </Text>
+            </View>
+          </>
+        )}
       </Pressable>
 
       {/* Track info */}
       <View style={styles.trackInfo}>
-        <Text style={styles.trackTitle} numberOfLines={2}>{track.trackTitle}</Text>
+        <Text style={styles.trackTitle} numberOfLines={2}>
+          {track?.title ?? 'Unknown track'}
+        </Text>
 
-        {/* Progress bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+        {durationSec > 0 && (
+          <View style={styles.progressContainer}>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
+            </View>
+            <View style={styles.progressTimes}>
+              <Text style={styles.progressTime}>{formatTime(progressSec)}</Text>
+              <Text style={styles.progressTime}>{formatTime(durationSec)}</Text>
+            </View>
           </View>
-          <View style={styles.progressTimes}>
-            <Text style={styles.progressTime}>{formatTime(track.progressSec)}</Text>
-            <Text style={styles.progressTime}>{formatTime(track.durationSec)}</Text>
-          </View>
-        </View>
+        )}
 
-        {/* Listen Together button */}
         <Pressable style={styles.listenTogetherButton} onPress={onListenTogether}>
           <Text style={styles.listenTogetherText}>Listen Together</Text>
         </Pressable>
-
-        {/* Queue */}
-        {track.queue.map((song, i) => (
-          <View key={i} style={styles.queueRow}>
-            <SymbolView name="text.justify" size={14} tintColor={ResonaraTheme.textSecondary} />
-            <Text style={styles.queueSong} numberOfLines={1}>{song}</Text>
-          </View>
-        ))}
 
         <View style={styles.queueRow}>
           <SymbolView name="plus.circle" size={14} tintColor={ResonaraTheme.textSecondary} />
@@ -119,26 +122,58 @@ function ActivityCard({ track, onListenTogether, onPlay }: { track: MockTrack; o
   );
 }
 
+type SubTab = 'friends' | 'following' | 'topArtists';
+
+const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: 'friends', label: 'Friends' },
+  { id: 'following', label: 'Following' },
+  { id: 'topArtists', label: 'Top Artists' },
+];
+
 interface Props {
   bottomInset: number;
 }
 
 export function TimelineFeed({ bottomInset }: Props) {
   const [subTab, setSubTab] = useState<SubTab>('following');
-  const [showListenTogether, setShowListenTogether] = useState(false);
+  const [sessions, setSessions] = useState<FeedSession[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeLTSession, setActiveLTSession] = useState<FeedSession | null>(null);
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const { play, openNowPlaying } = usePlayer();
 
-  const handlePlay = () => {
-    play(PLAYER_TRACK);
-    openNowPlaying();
-  };
+  async function loadFeed(isRefresh = false) {
+    if (!user) return;
+    isRefresh ? setRefreshing(true) : setLoading(true);
+    try {
+      const data = await SessionsService.getFollowingFeed(user.id);
+      setSessions(data);
+    } catch (e) {
+      console.error('Failed to load feed:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
 
-  if (showListenTogether) {
+  useEffect(() => {
+    if (subTab === 'following') loadFeed();
+  }, [subTab, user]);
+
+  function handlePlay(session: FeedSession) {
+    const track = sessionToPlayerTrack(session);
+    play(track, session.id);
+    openNowPlaying();
+  }
+
+  if (activeLTSession) {
     return (
       <ListenTogetherView
-        track={PLAYER_TRACK}
-        onBack={() => setShowListenTogether(false)}
+        track={sessionToPlayerTrack(activeLTSession)}
+        sessionId={activeLTSession.id}
+        onBack={() => setActiveLTSession(null)}
         bottomInset={bottomInset}
       />
     );
@@ -151,30 +186,48 @@ export function TimelineFeed({ bottomInset }: Props) {
         {SUB_TABS.map((tab) => {
           const isActive = subTab === tab.id;
           return (
-            <Pressable
-              key={tab.id}
-              style={styles.subTab}
-              onPress={() => setSubTab(tab.id)}>
-              <Text style={[styles.subTabText, isActive && styles.subTabTextActive]}>
-                {tab.label}
-              </Text>
+            <Pressable key={tab.id} style={styles.subTab} onPress={() => setSubTab(tab.id)}>
+              <Text style={[styles.subTabText, isActive && styles.subTabTextActive]}>{tab.label}</Text>
               {isActive && <View style={styles.subTabIndicator} />}
             </Pressable>
           );
         })}
       </View>
 
-      {/* Feed */}
       <ScrollView
         style={styles.feed}
         contentContainerStyle={{ paddingBottom: bottomInset }}
-        showsVerticalScrollIndicator={false}>
-        {subTab === 'following' && (
-          <ActivityCard
-            track={MOCK_TRACK}
-            onPlay={handlePlay}
-            onListenTogether={() => setShowListenTogether(true)}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadFeed(true)}
+            tintColor={ResonaraTheme.accent}
           />
+        }>
+        {subTab === 'following' && (
+          <>
+            {loading ? (
+              <ActivityIndicator style={styles.loader} color={ResonaraTheme.accent} />
+            ) : sessions.length === 0 ? (
+              <View style={styles.emptyState}>
+                <SymbolView name="music.note.list" size={40} tintColor={ResonaraTheme.textMuted} />
+                <Text style={styles.emptyText}>No active sessions</Text>
+                <Text style={styles.emptySubText}>
+                  Follow people to see what they're listening to right now
+                </Text>
+              </View>
+            ) : (
+              sessions.map((s) => (
+                <ActivityCard
+                  key={s.id}
+                  session={s}
+                  onPlay={() => handlePlay(s)}
+                  onListenTogether={() => setActiveLTSession(s)}
+                />
+              ))
+            )}
+          </>
         )}
         {subTab === 'friends' && (
           <View style={styles.emptyState}>
@@ -196,198 +249,77 @@ export function TimelineFeed({ bottomInset }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: ResonaraTheme.background,
-  },
+  container: { flex: 1, backgroundColor: ResonaraTheme.background },
   subTabBar: {
     flexDirection: 'row',
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: ResonaraTheme.border,
   },
-  subTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  subTabText: {
-    color: ResonaraTheme.textMuted,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  subTabTextActive: {
-    color: ResonaraTheme.text,
-    fontWeight: '700',
-  },
+  subTab: { paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', position: 'relative' },
+  subTabText: { color: ResonaraTheme.textMuted, fontSize: 14, fontWeight: '600' },
+  subTabTextActive: { color: ResonaraTheme.text, fontWeight: '700' },
   subTabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    left: 16,
-    right: 16,
-    height: 2,
-    backgroundColor: ResonaraTheme.text,
-    borderRadius: 1,
+    position: 'absolute', bottom: 0, left: 16, right: 16,
+    height: 2, backgroundColor: ResonaraTheme.text, borderRadius: 1,
   },
-  feed: {
-    flex: 1,
-  },
-  card: {
-    backgroundColor: ResonaraTheme.background,
-  },
+  feed: { flex: 1 },
+  loader: { marginTop: 60 },
+  card: { backgroundColor: ResonaraTheme.background },
   artistRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 10,
+    flexDirection: 'row', alignItems: 'flex-start',
+    paddingHorizontal: 16, paddingVertical: 14, gap: 10,
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 42, height: 42, borderRadius: 21,
     backgroundColor: ResonaraTheme.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: ResonaraTheme.accentPink,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: ResonaraTheme.accentPink,
   },
-  avatarInitials: {
-    color: ResonaraTheme.text,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  artistInfo: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  artistNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  artistName: {
-    color: ResonaraTheme.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  listeningTo: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  listeningToLink: {
-    color: ResonaraTheme.accent,
-    textDecorationLine: 'underline',
-  },
+  avatarImage: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: ResonaraTheme.accentPink },
+  avatarInitials: { color: ResonaraTheme.text, fontSize: 13, fontWeight: '700' },
+  artistInfo: { flex: 1, justifyContent: 'center' },
+  artistName: { color: ResonaraTheme.text, fontSize: 15, fontWeight: '700' },
+  listeningTo: { color: ResonaraTheme.textSecondary, fontSize: 12, marginTop: 2 },
+  listeningToLink: { color: ResonaraTheme.accent, textDecorationLine: 'underline' },
   albumArt: {
-    width: '100%',
-    aspectRatio: 1,
-    backgroundColor: '#2A0808',
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
+    width: '100%', aspectRatio: 1, backgroundColor: '#2A0808',
+    justifyContent: 'flex-end', overflow: 'hidden',
   },
   albumGradient: {
     ...StyleSheet.absoluteFill,
     experimental_backgroundImage: 'linear-gradient(180deg, #3D0C0C 0%, #1A0404 65%, #0D0208 100%)',
   },
-  albumTextOverlay: {
-    padding: 20,
-  },
+  albumTextOverlay: { padding: 20 },
   albumTitleText: {
-    color: 'rgba(160, 20, 20, 0.65)',
-    fontSize: 90,
-    fontWeight: '900',
-    fontStyle: 'italic',
-    letterSpacing: -4,
-    lineHeight: 80,
+    color: 'rgba(160, 20, 20, 0.65)', fontSize: 72, fontWeight: '900',
+    fontStyle: 'italic', letterSpacing: -4, lineHeight: 72,
   },
   albumArtistText: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: 5,
-    textTransform: 'uppercase',
-    marginTop: 6,
+    color: 'rgba(255,255,255,0.3)', fontSize: 15, fontWeight: '700',
+    letterSpacing: 5, textTransform: 'uppercase', marginTop: 6,
   },
-  trackInfo: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 6,
-  },
-  trackTitle: {
-    color: ResonaraTheme.text,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  progressContainer: {
-    marginBottom: 14,
-  },
+  trackInfo: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  trackTitle: { color: ResonaraTheme.text, fontSize: 14, fontWeight: '700', lineHeight: 20, marginBottom: 10 },
+  progressContainer: { marginBottom: 14 },
   progressTrack: {
-    height: 3,
-    backgroundColor: ResonaraTheme.progressTrack,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 5,
+    height: 3, backgroundColor: ResonaraTheme.progressTrack,
+    borderRadius: 2, overflow: 'hidden', marginBottom: 5,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: ResonaraTheme.accent,
-    borderRadius: 2,
-  },
-  progressTimes: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  progressTime: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 11,
-  },
+  progressFill: { height: '100%', backgroundColor: ResonaraTheme.accent, borderRadius: 2 },
+  progressTimes: { flexDirection: 'row', justifyContent: 'space-between' },
+  progressTime: { color: ResonaraTheme.textSecondary, fontSize: 11 },
   listenTogetherButton: {
-    borderWidth: 1,
-    borderColor: ResonaraTheme.text,
-    borderRadius: 24,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 12,
+    borderWidth: 1, borderColor: ResonaraTheme.text, borderRadius: 24,
+    paddingVertical: 12, alignItems: 'center', marginBottom: 12,
   },
-  listenTogetherText: {
-    color: ResonaraTheme.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  queueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 6,
-  },
-  queueSong: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 13,
-    flex: 1,
-  },
+  listenTogetherText: { color: ResonaraTheme.text, fontSize: 15, fontWeight: '600' },
+  queueRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  queueSong: { color: ResonaraTheme.textSecondary, fontSize: 13, flex: 1 },
   emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    paddingHorizontal: 32,
-    gap: 12,
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    paddingTop: 80, paddingHorizontal: 32, gap: 12,
   },
-  emptyText: {
-    color: ResonaraTheme.textSecondary,
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  emptySubText: {
-    color: ResonaraTheme.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  emptyText: { color: ResonaraTheme.textSecondary, fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  emptySubText: { color: ResonaraTheme.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 18 },
 });
