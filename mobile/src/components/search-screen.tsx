@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PageHeader } from '@/components/page-header';
 import { ResonaraTheme } from '@/constants/theme';
 import { usePlayer } from '@/context/player';
+import { useErrorAlert } from '@/hooks/use-error-alert';
 import { TracksService } from '@/services/tracks.service';
 import type { Track } from '@/types/database';
 
@@ -98,19 +100,25 @@ export function SearchScreen({ bottomInset }: Props) {
   const [searching, setSearching] = useState(false);
   const insets = useSafeAreaInsets();
   const { play, openNowPlaying } = usePlayer();
+  const { handleError } = useErrorAlert();
+  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function handleSearch(text: string) {
     setQuery(text);
     if (!text.trim()) { setResults([]); return; }
-    setSearching(true);
-    try {
-      const data = await TracksService.search(text.trim());
-      setResults(data);
-    } catch (e) {
-      console.error('Search failed:', e);
-    } finally {
-      setSearching(false);
-    }
+    // Debounce to avoid hammering Supabase on every keystroke
+    if (searchRef.current) clearTimeout(searchRef.current);
+    searchRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await TracksService.search(text.trim());
+        setResults(data);
+      } catch (e) {
+        handleError(e, 'Search failed. Please check your connection and try again.');
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
   }
 
   function playTrack(track: Track) {
@@ -130,8 +138,8 @@ export function SearchScreen({ bottomInset }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.screenTitle}>Search</Text>
+      <PageHeader title="Search" border={false} />
+      <View style={[styles.searchBarWrapper, { paddingHorizontal: 16, paddingBottom: 8 }]}>
         <View style={[styles.searchBar, focused && styles.searchBarFocused]}>
           <SymbolView name="magnifyingglass" size={16} tintColor={ResonaraTheme.textMuted} />
           <TextInput
@@ -152,7 +160,7 @@ export function SearchScreen({ bottomInset }: Props) {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }} keyboardShouldPersistTaps="handled">
 
         {/* ── Search results ──────────────────────────────────────── */}
         {query.length > 0 && (
@@ -204,8 +212,7 @@ export function SearchScreen({ bottomInset }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: ResonaraTheme.background },
-  header: { paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
-  screenTitle: { color: ResonaraTheme.text, fontSize: 28, fontWeight: '700' },
+  searchBarWrapper: {},
   searchBar: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: ResonaraTheme.surface, borderRadius: 12,

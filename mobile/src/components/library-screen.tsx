@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PageHeader } from '@/components/page-header';
 import { ResonaraTheme } from '@/constants/theme';
 import { useAuth } from '@/context/auth';
 import { usePlayer } from '@/context/player';
+import { useErrorAlert } from '@/hooks/use-error-alert';
 import { AlbumsService } from '@/services/albums.service';
 import { TracksService } from '@/services/tracks.service';
 import type { Album, TrackWithAlbum } from '@/types/database';
@@ -141,6 +143,8 @@ export function LibraryScreen({ bottomInset }: Props) {
     { id: 'songs', label: 'Songs' },
   ];
 
+  const { handleError } = useErrorAlert();
+
   async function loadData(isRefresh = false) {
     isRefresh ? setRefreshing(true) : setLoading(true);
     try {
@@ -151,7 +155,7 @@ export function LibraryScreen({ bottomInset }: Props) {
       setAlbums(albumsData);
       setTracks(tracksData);
     } catch (e) {
-      console.error('Library load failed:', e);
+      handleError(e, 'Failed to load library. Please check your connection.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -180,10 +184,7 @@ export function LibraryScreen({ bottomInset }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.screenTitle}>Your Library</Text>
-      </View>
+      <PageHeader title="Your Library" border={false} />
 
       {/* Filter tabs (centered, equal width) */}
       <View style={styles.filterTabs}>

@@ -11,10 +11,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EditProfileModal } from '@/components/edit-profile-modal';
+import { PageHeader } from '@/components/page-header';
 import { ResonaraTheme } from '@/constants/theme';
+import { useErrorAlert } from '@/hooks/use-error-alert';
 import { useAuth } from '@/context/auth';
 import { usePlayer } from '@/context/player';
 import { FollowsService } from '@/services/follows.service';
@@ -39,7 +40,6 @@ export function ProfileScreen({ bottomInset }: Props) {
   const [loadingFollowing, setLoadingFollowing] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
 
-  const insets = useSafeAreaInsets();
   const { user, signOut } = useAuth();
   const { currentTrack, isPlaying, openNowPlaying, stop } = usePlayer();
 
@@ -67,19 +67,21 @@ export function ProfileScreen({ bottomInset }: Props) {
     { id: 'following', label: 'Following' },
   ];
 
+  const { handleError } = useErrorAlert();
+
   useEffect(() => {
     if (activeTab === 'activity' && user) {
       setLoadingFeed(true);
       SessionsService.getFollowingFeed(user.id)
         .then(setFeedSessions)
-        .catch(console.error)
+        .catch((e) => handleError(e, 'Failed to load activity. Please try again.'))
         .finally(() => setLoadingFeed(false));
     }
     if (activeTab === 'following' && user) {
       setLoadingFollowing(true);
       FollowsService.getFollowing(user.id)
         .then(setFollowing)
-        .catch(console.error)
+        .catch((e) => handleError(e, 'Failed to load following list. Please try again.'))
         .finally(() => setLoadingFollowing(false));
     }
   }, [activeTab, user]);
@@ -89,10 +91,20 @@ export function ProfileScreen({ bottomInset }: Props) {
   return (
     <View style={styles.container}>
       <EditProfileModal visible={showEditProfile} onClose={() => setShowEditProfile(false)} />
+
+      {/* Consistent top nav — logout on the right */}
+      <PageHeader
+        title="Profile"
+        right={
+          <Pressable style={styles.headerLogoutBtn} onPress={confirmSignOut} hitSlop={8}>
+            <Ionicons name="log-out-outline" size={22} color={ResonaraTheme.accentPink} />
+          </Pressable>
+        }
+      />
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
-        {/* Hero */}
-        <View style={[styles.hero, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.heroActions} />
+        {/* Hero — remove duplicate top spacing since PageHeader provides it */}
+        <View style={styles.hero}>
 
           {/* Avatar */}
           <View style={styles.avatarWrapper}>
@@ -258,6 +270,11 @@ const styles = StyleSheet.create({
     backgroundColor: ResonaraTheme.accentPink,
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 2, borderColor: ResonaraTheme.background,
+  },
+  headerLogoutBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: ResonaraTheme.accentPink,
+    justifyContent: 'center', alignItems: 'center',
   },
   displayName: { color: ResonaraTheme.text, fontSize: 20, fontWeight: '700', marginBottom: 2 },
   handle: { color: ResonaraTheme.textSecondary, fontSize: 14, marginBottom: 16 },

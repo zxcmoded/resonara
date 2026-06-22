@@ -169,14 +169,14 @@ create policy "follows_delete" on follows for delete using (auth.uid() = followe
 -- albums
 alter table albums enable row level security;
 create policy "albums_select" on albums for select using (true);
-create policy "albums_insert" on albums for insert with check (auth.uid() = uploaded_by);
+create policy "albums_insert" on albums for insert with check (uploaded_by is null or auth.uid() = uploaded_by);
 create policy "albums_update" on albums for update using (auth.uid() = uploaded_by);
 create policy "albums_delete" on albums for delete using (auth.uid() = uploaded_by);
 
 -- tracks
 alter table tracks enable row level security;
 create policy "tracks_select" on tracks for select using (true);
-create policy "tracks_insert" on tracks for insert with check (auth.uid() = uploaded_by);
+create policy "tracks_insert" on tracks for insert with check (uploaded_by is null or auth.uid() = uploaded_by);
 create policy "tracks_update" on tracks for update using (auth.uid() = uploaded_by);
 create policy "tracks_delete" on tracks for delete using (auth.uid() = uploaded_by);
 

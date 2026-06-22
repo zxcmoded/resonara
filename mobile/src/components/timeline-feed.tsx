@@ -13,9 +13,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ListenTogetherView } from '@/components/listen-together-view';
+import { PageHeader } from '@/components/page-header';
 import { ResonaraTheme } from '@/constants/theme';
 import { useAuth } from '@/context/auth';
 import { usePlayer } from '@/context/player';
+import { useErrorAlert } from '@/hooks/use-error-alert';
 import { SessionsService, sessionToPlayerTrack, type FeedSession } from '@/services/sessions.service';
 
 function formatTime(sec: number) {
@@ -143,6 +145,7 @@ export function TimelineFeed({ bottomInset }: Props) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { play, openNowPlaying } = usePlayer();
+  const { handleError } = useErrorAlert();
 
   async function loadFeed(isRefresh = false) {
     if (!user) return;
@@ -151,7 +154,7 @@ export function TimelineFeed({ bottomInset }: Props) {
       const data = await SessionsService.getFollowingFeed(user.id);
       setSessions(data);
     } catch (e) {
-      console.error('Failed to load feed:', e);
+      handleError(e, 'Failed to load feed. Please check your connection.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -181,8 +184,9 @@ export function TimelineFeed({ bottomInset }: Props) {
 
   return (
     <View style={styles.container}>
+      <PageHeader title="Timeline" border={false} />
       {/* Sub-tabs */}
-      <View style={[styles.subTabBar, { paddingTop: insets.top }]}>
+      <View style={styles.subTabBar}>
         {SUB_TABS.map((tab) => {
           const isActive = subTab === tab.id;
           return (

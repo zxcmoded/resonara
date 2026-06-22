@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PageHeader } from '@/components/page-header';
 import { ResonaraTheme } from '@/constants/theme';
 
 interface Props {
@@ -9,13 +9,9 @@ interface Props {
 }
 
 export function NotificationsScreen({ bottomInset }: Props) {
-  const insets = useSafeAreaInsets();
-
   return (
     <View style={[styles.container, { paddingBottom: bottomInset }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.screenTitle}>Notifications</Text>
-      </View>
+      <PageHeader title="Notifications" />
 
       <View style={styles.emptyState}>
         <SymbolView name="bell.slash" size={48} tintColor={ResonaraTheme.textMuted} />
@@ -30,8 +26,6 @@ export function NotificationsScreen({ bottomInset }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: ResonaraTheme.background },
-  header: { paddingHorizontal: 16, paddingBottom: 8 },
-  screenTitle: { color: ResonaraTheme.text, fontSize: 28, fontWeight: '700' },
   emptyState: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: 40, gap: 12,
